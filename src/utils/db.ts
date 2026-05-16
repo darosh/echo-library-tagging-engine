@@ -408,7 +408,9 @@ export function getSimplifiedGenreTagStats(
 	return [...named, ...collapsed]
 }
 
-export function getFilesWithMood(db: Database): { path: string; mood: string; file_name: string; strip_name: string | null; ascii_name: string | null; strip_ascii_name: string | null }[] {
+export function getFilesWithMood(
+	db: Database,
+): { path: string; mood: string; file_name: string; strip_name: string | null; ascii_name: string | null; strip_ascii_name: string | null }[] {
 	return db.prepare(
 		`SELECT path, mood, file_name, strip_name, ascii_name, strip_ascii_name FROM files WHERE mood IS NOT NULL AND analyze_status = 'done'`,
 	).all() as { path: string; mood: string; file_name: string; strip_name: string | null; ascii_name: string | null; strip_ascii_name: string | null }[]
