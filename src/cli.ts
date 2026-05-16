@@ -4,6 +4,7 @@ import { openDb } from './utils/db.ts'
 import { collect, DEFAULT_FILTER } from './commands/collect.ts'
 import { copy } from './commands/copy.ts'
 import { analyze } from './commands/analyze.ts'
+import { analyzeNative } from './commands/analyze-native.ts'
 import { write } from './commands/write.ts'
 import { stats } from './commands/stats.ts'
 import { consolidate } from './commands/consolidate.ts'
@@ -72,19 +73,25 @@ export function buildCli() {
 				.option('--concurrency <n:number>', 'Parallel workers', { default: DEFAULT_CONCURRENCY })
 				.option('--max <seconds:number>', 'Limit audio analyzed per file to this many seconds (central slice)')
 				.option('--ignore <genres:string>', 'Comma-separated original genres to skip', { default: DEFAULT_IGNORE })
+				.option('--runtime <rt:string>', 'ONNX runtime: wasm (default) or native (faster, requires quarantine clear on macOS)', { default: 'wasm' })
 				.option('--dry-run', 'Preview without modifying database')
-				.action(async ({ input, db: dbPath, modelsDir, concurrency, max, ignore, dryRun }) => {
+				.action(async ({ input, db: dbPath, modelsDir, concurrency, max, ignore, runtime, dryRun }) => {
 					const db = openDb(resolve(dbPath))
+					const sharedOpts = {
+						db,
+						root: resolve(input),
+						modelsDir: resolve(modelsDir),
+						concurrency,
+						dryRun: dryRun ?? false,
+						maxSeconds: max,
+						ignore: parseIgnore(ignore),
+					}
 					try {
-						await analyze({
-							db,
-							root: resolve(input),
-							modelsDir: resolve(modelsDir),
-							concurrency,
-							dryRun: dryRun ?? false,
-							maxSeconds: max,
-							ignore: parseIgnore(ignore),
-						})
+						if (runtime === 'native') {
+							await analyzeNative(sharedOpts)
+						} else {
+							await analyze(sharedOpts)
+						}
 					} finally {
 						db.close()
 					}

@@ -42,6 +42,12 @@ git clone https://github.com/jan/echo-library-tagging-engine.git
 cd echo-library-tagging-engine
 ```
 
+The ONNX native bindings for `db-analyze` are downloaded via npm but macOS quarantines them. Clear the flag once after cloning or after running `deno run -A elite.ts` for the first time (which triggers the npm cache download):
+
+```bash
+find node_modules/.deno/onnxruntime-node* -name "*.dylib" -o -name "*.node" | xargs xattr -d com.apple.quarantine 2>/dev/null; echo "Done"
+```
+
 ## Usage
 
 ### Print help
