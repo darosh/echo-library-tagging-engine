@@ -88,6 +88,7 @@ Commands:
   sd-count           - Count audio files per top-level folder
   sd-copy            - Copy audio files to destination in sorted order (no Mac artifacts)
   sd-demac           - Clean Mac artifacts from an SD card```
+```
 
 ### Count your files
 
