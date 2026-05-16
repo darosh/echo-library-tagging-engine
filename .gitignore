@@ -1,0 +1,11 @@
+# TEMP
+models/
+fixtures/
+db/
+temp/
+
+# NODE
+node_modules/
+
+# IDE
+.idea/
