@@ -8,8 +8,10 @@ import { printHeader, printInfo, printSuccess, Progress } from '../utils/progres
 export const DEFAULT_FILTER = '**/*.{mp3,flac,dsf}'
 const SUPPORTED_EXTS = new Set(['.mp3', '.flac', '.dsf'])
 
+// 'genre 1' (ID3v1) is queried separately because it emits no output line when
+// the ID3v1 tag is absent, which would shift all subsequent index-based field mappings.
+const KID3_FIELDS_GENRE1 = ['genre 1']
 const KID3_FIELDS = [
-	'genre 1',
 	'genre 2',
 	'title 2',
 	'tracknumber 2',
@@ -68,16 +70,17 @@ export async function collect(opts: {
 			// Collect kid3 + stat for all files in folder in parallel
 			const results = await Promise.all(folderFiles.map(async (filePath) => {
 				const nfcPath = filePath.normalize('NFC')
-				const [fields, stat] = await Promise.all([
+				const [genre1Fields, fields, stat] = await Promise.all([
+					readKid3Fields(nfcPath, KID3_FIELDS_GENRE1),
 					readKid3Fields(nfcPath, KID3_FIELDS),
 					Deno.stat(filePath).catch(() => null),
 				])
-				return { filePath, fields, stat }
+				return { filePath, genre1Fields, fields, stat }
 			}))
 
 			// Build parsed paths and deduplicate strip_ascii_name within folder
 			const used = new Map<string, number>()
-			for (const { filePath, fields, stat } of results) {
+			for (const { filePath, genre1Fields, fields, stat } of results) {
 				const relPath = relative(root, filePath)
 				const parsed = parsePath(relPath)
 
@@ -93,7 +96,8 @@ export async function collect(opts: {
 				}
 
 				const mtime = stat?.mtime?.getTime() ?? null
-				const [genre1, genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2] = fields
+				const [genre1] = genre1Fields
+				const [genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2] = fields
 				upsertFile(db, relPath, mtime, genre1, genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2, parsed)
 				progress.increment(relPath)
 			}

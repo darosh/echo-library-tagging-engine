@@ -297,21 +297,21 @@ deno run -A elite.ts db-mood-playlists --input $MY_LIB --db $MY_DB --output $MY_
 ```
 mood        tracks
 ----------  ------
-energetic     3549
-love          2520
-film          2081
-melodic       1761
-relaxing      1253
+energetic     3516
+love          2406
+film          2003
+melodic       1724
+relaxing      1247
 happy         1100
-dark           695
+dark           666
 christmas      597
 deep           564
-meditative     552
+meditative     535
 epic           445
 heavy          404
 space          308
-ballad         226
-soundscape     179
+ballad         224
+soundscape     153
 
 Wrote 15 playlists to /Volumes/ALl/MUSIC/_MOODS
 ```
