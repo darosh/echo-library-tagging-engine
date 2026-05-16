@@ -47,27 +47,29 @@ Options:
 
 Commands:
 
-  db-collect        - Scan library and extract metadata via kid3 → SQLite                 
-  db-analyze        - Run essentia mood/genre inference on collected files → SQLite       
-  db-collect-lufs   - Scan album LUFS/peak/gain via rsgain → SQLite                       
-  db-stats          - Show mood tag distribution from analysis results                    
-  db-write          - Write Genre tag to audio files from analysis results                
-  db-consolidate    - Write consolidated genre tags to audio files                        
-  from-dsf-to-flac  - Convert DSF files to FLAC at 24-bit/96kHz                           
-  from-wav-to-flac  - Convert WAV files to FLAC at 24-bit/96kHz                           
-  from-flac-to-mp3  - Convert FLAC and DSF files to MP3 (VBR V0)                          
-  from-mp4-to-mp3   - Extract audio from MP4/M4A files to MP3                             
-  from-m4a-to-mp3   - Convert M4A files to MP3 (preserving bitrate)                       
-  from-wma-to-mp3   - Convert WMA files to MP3                                            
-  flac-check        - Validate FLAC files for blocksize, sample rate, and bit depth limits
-  flac-fix          - Re-encode non-compliant FLAC files in-place with blocksize 4096     
-  tag-verify        - Verify audio file tags directly from files (no database)            
-  tag-resize-art    - Resize embedded album art larger than 500x500 pixels using kid3     
-  tag-janitor       - Strip ID3v1 and non-standard tags from audio files via kid3         
-  sd-count          - Count audio files per top-level folder                              
-  sd-copy           - Copy audio files to destination in sorted order (no Mac artifacts)  
-  sd-demac          - Clean Mac artifacts from an SD card         
-```
+  db-collect         - Scan library and extract metadata via kid3 → SQLite
+  db-analyze         - Run essentia mood/genre inference on collected files → SQLite
+  db-collect-lufs    - Scan album LUFS/peak/gain via rsgain → SQLite
+  db-stats           - Show mood tag distribution from analysis results
+  db-write           - Write Genre tag to audio files from analysis results
+  db-consolidate     - Write consolidated genre tags to audio files
+  db-show            - Start web visualizer for genres and moods from a database
+  db-mood-playlists  - Write M3U playlists grouped by mood from a database
+  from-dsf-to-flac   - Convert DSF files to FLAC at 24-bit/96kHz
+  from-wav-to-flac   - Convert WAV files to FLAC at 24-bit/96kHz
+  from-flac-to-mp3   - Convert FLAC and DSF files to MP3 (VBR V0)
+  from-mp4-to-mp3    - Extract audio from MP4/M4A files to MP3
+  from-m4a-to-mp3    - Convert M4A files to MP3 (preserving bitrate)
+  from-wma-to-mp3    - Convert WMA files to MP3
+  flac-check         - Validate FLAC files for blocksize, sample rate, and bit depth limits
+  flac-fix           - Re-encode non-compliant FLAC files in-place with blocksize 4096
+  tag-verify         - Verify audio file tags directly from files (no database)
+  tag-resize-art     - Normalize embedded album art: resize if >500px, convert non-JPEG formats and
+                       progressive JPEGs to non-progressive JPEG
+  tag-janitor        - Strip ID3v1 and non-standard tags from audio files via kid3
+  sd-count           - Count audio files per top-level folder
+  sd-copy            - Copy audio files to destination in sorted order (no Mac artifacts)
+  sd-demac           - Clean Mac artifacts from an SD card```
 
 ### Count your files
 
