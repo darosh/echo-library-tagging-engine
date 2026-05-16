@@ -5,6 +5,24 @@
 - It is experimental / unstable, and you will be likely much happier with [silent-sphinx/snowsky-echo-mini-toolbox](https://github.com/silent-sphinx/snowsky-echo-mini-toolbox)
 - Backup your files
 
+## Table of contents
+
+- [Setup](#setup)
+- [Usage](#usage)
+  - [Print help](#print-help)
+  - Files, SD card, MAC artifacts
+    - [Count your files](#count-your-files)
+    - [Filter and count files](#filter-and-count-files)
+    - [Copy filtered files to SD card](#copy-filtered-files-to-sd-card)
+    - [Copy filtered files to SD card without track numbers and special characters](#copy-filtered-files-to-sd-card-without-track-numbers-and-special-characters)
+    - [Clean Mac artifacts from an SD card](#clean-mac-artifacts-from-an-sd-card)
+  - Tag cleanup
+    - [Check album art](#check-album-art)
+    - [Check and fix album art](#check-and-fix-album-art)
+  - DB, analysis and mood playlists
+    - [Scan and analyze to db](#scan-and-analyze-to-db)
+    - [Make mood playlists](#make-mood-playlists)
+
 ## Setup
 
 ```bash
