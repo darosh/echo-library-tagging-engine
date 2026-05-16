@@ -1,6 +1,6 @@
 import { join } from '@std/path'
 import { Database } from '@db/sqlite'
-import { getPendingForWrite, lookupSimplified, setWriteDone, setWriteError } from '../utils/db.ts'
+import { getPendingForWrite, lookupSimplified, setGenreNew } from '../utils/db.ts'
 import { ensureSimplify, SimplifyOption } from '../utils/simplify.ts'
 import { printError, printHeader, printInfo, printSuccess, Progress } from '../utils/progress.ts'
 
@@ -49,9 +49,8 @@ export async function write(opts: {
 			const tag = applyFormat(format, file.mood ?? '', file.genre_2 ?? file.genre_1 ?? '', simplified)
 			try {
 				await writeTag(join(root, file.path), tag)
-				setWriteDone(db, file.id)
+				setGenreNew(db, file.id, tag)
 			} catch (err) {
-				setWriteError(db, file.id)
 				errors++
 				printError(file.path, err instanceof Error ? err.message : String(err))
 			}

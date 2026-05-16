@@ -278,7 +278,7 @@ deno run -A elite.ts tag-resize-art --input $MY_LIB --dry-run
 deno run -A elite.ts tag-resize-art --input $MY_LIB
 ```
 
-### Scan and analyze to db
+### Scan and analyze mood to db
 
 ```bash
 MY_LIB=/Volumes/ALl/MUSIC

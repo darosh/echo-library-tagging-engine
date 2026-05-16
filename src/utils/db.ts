@@ -38,8 +38,6 @@ export function parsePath(path: string): {
 	return { root_path, artist_path, album_path, file_name, file_type, strip_name, ascii_name, strip_ascii_name }
 }
 
-export type FileStatus = 'pending' | 'done' | 'error'
-
 export interface FileRow {
 	id: number
 	path: string
@@ -52,15 +50,13 @@ export interface FileRow {
 	tag: string | null
 	genre_1: string | null
 	genre_2: string | null
+	genre_new: string | null
 	title_2: string | null
 	track_number_2: string | null
 	artist_2: string | null
 	album_artist_2: string | null
 	date_2: string | null
 	disc_number_2: string | null
-	collect_status: FileStatus
-	analyze_status: FileStatus
-	write_status: FileStatus
 	root_path: string | null
 	artist_path: string | null
 	album_path: string | null
@@ -106,6 +102,18 @@ export function openDb(dbPath: string): Database {
 		db.exec('ALTER TABLE files ADD COLUMN strip_name TEXT')
 		db.exec('ALTER TABLE files ADD COLUMN ascii_name TEXT')
 	}
+	if (cols.length > 0 && cols.includes('collect_status')) {
+		db.exec('ALTER TABLE files DROP COLUMN collect_status')
+	}
+	if (cols.length > 0 && cols.includes('analyze_status')) {
+		db.exec('ALTER TABLE files DROP COLUMN analyze_status')
+	}
+	if (cols.length > 0 && cols.includes('write_status')) {
+		db.exec('ALTER TABLE files DROP COLUMN write_status')
+	}
+	if (cols.length > 0 && !cols.includes('genre_new')) {
+		db.exec('ALTER TABLE files ADD COLUMN genre_new TEXT')
+	}
 
 	db.exec(`
     CREATE TABLE IF NOT EXISTS files (
@@ -120,15 +128,13 @@ export function openDb(dbPath: string): Database {
       tag              TEXT,
       genre_1          TEXT,
       genre_2          TEXT,
+      genre_new        TEXT,
       title_2          TEXT,
       track_number_2   TEXT,
       artist_2         TEXT,
       album_artist_2   TEXT,
       date_2           TEXT,
       disc_number_2    TEXT,
-      collect_status   TEXT DEFAULT 'pending',
-      analyze_status   TEXT DEFAULT 'pending',
-      write_status     TEXT DEFAULT 'pending',
       root_path        TEXT,
       artist_path      TEXT,
       album_path       TEXT,
@@ -173,8 +179,8 @@ export function upsertFile(
 ): void {
 	if (!parsed) parsed = parsePath(path)
 	db.exec(
-		`INSERT INTO files (path, mtime, genre_1, genre_2, title_2, track_number_2, artist_2, album_artist_2, date_2, disc_number_2, collect_status, root_path, artist_path, album_path, file_name, file_type, strip_name, ascii_name, strip_ascii_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO files (path, mtime, genre_1, genre_2, title_2, track_number_2, artist_2, album_artist_2, date_2, disc_number_2, root_path, artist_path, album_path, file_name, file_type, strip_name, ascii_name, strip_ascii_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(path) DO UPDATE SET
        mtime            = excluded.mtime,
        genre_1          = excluded.genre_1,
@@ -185,7 +191,6 @@ export function upsertFile(
        album_artist_2   = excluded.album_artist_2,
        date_2           = excluded.date_2,
        disc_number_2    = excluded.disc_number_2,
-       collect_status   = 'done',
        root_path        = excluded.root_path,
        artist_path      = excluded.artist_path,
        album_path       = excluded.album_path,
@@ -237,46 +242,52 @@ export function getFilesForLufs(db: Database): { path: string }[] {
 	).all() as { path: string }[]
 }
 
-export function getPendingForAnalysis(db: Database, ignore: string[] = []): FileRow[] {
+export function getPendingForAnalysis(db: Database, models: string[], ignore: string[] = []): FileRow[] {
+	const nullChecks = models
+		.map((m) => ({ mood: 'mood IS NULL', genre: 'genre IS NULL', tag: 'tag IS NULL' })[m])
+		.filter(Boolean)
+		.join(' OR ')
 	const clause = buildIgnoreClause(ignore)
 	return db.prepare(
-		`SELECT * FROM files WHERE (analyze_status = 'pending' OR analyze_status = 'error') ${clause}`,
+		`SELECT * FROM files WHERE (${nullChecks || '1=0'}) ${clause}`,
 	).all(...ignore) as FileRow[]
 }
 
 export function getPendingForWrite(db: Database, ignore: string[] = []): FileRow[] {
 	const clause = buildIgnoreClause(ignore)
 	return db.prepare(
-		`SELECT * FROM files WHERE (write_status = 'pending' OR write_status = 'error') AND mood IS NOT NULL ${clause}`,
+		`SELECT * FROM files WHERE genre_new IS NULL AND mood IS NOT NULL ${clause}`,
 	).all(...ignore) as FileRow[]
 }
 
 export function saveAnalysis(
 	db: Database,
 	fileId: number,
+	models: string[],
 	mood: string,
 	genre: string,
 	tag: string,
 ): void {
-	db.exec(
-		`UPDATE files SET mood = ?, genre = ?, tag = ?, analyze_status = 'done' WHERE id = ?`,
-		mood,
-		genre,
-		tag,
-		fileId,
-	)
+	const sets: string[] = []
+	const vals: (string | number)[] = []
+	if (models.includes('mood')) {
+		sets.push('mood = ?')
+		vals.push(mood)
+	}
+	if (models.includes('genre')) {
+		sets.push('genre = ?')
+		vals.push(genre)
+	}
+	if (models.includes('tag')) {
+		sets.push('tag = ?')
+		vals.push(tag)
+	}
+	if (sets.length === 0) return
+	db.exec(`UPDATE files SET ${sets.join(', ')} WHERE id = ?`, ...vals, fileId)
 }
 
-export function setAnalyzeError(db: Database, fileId: number): void {
-	db.exec(`UPDATE files SET analyze_status = 'error' WHERE id = ?`, fileId)
-}
-
-export function setWriteDone(db: Database, fileId: number): void {
-	db.exec(`UPDATE files SET write_status = 'done' WHERE id = ?`, fileId)
-}
-
-export function setWriteError(db: Database, fileId: number): void {
-	db.exec(`UPDATE files SET write_status = 'error' WHERE id = ?`, fileId)
+export function setGenreNew(db: Database, fileId: number, genre: string): void {
+	db.exec(`UPDATE files SET genre_new = ? WHERE id = ?`, genre, fileId)
 }
 
 export function getMoodStats(db: Database, ignore: string[] = []): { mood: string; count: number }[] {
@@ -413,7 +424,7 @@ export function getFilesWithMood(
 	db: Database,
 ): { path: string; mood: string; file_name: string; strip_name: string | null; ascii_name: string | null; strip_ascii_name: string | null }[] {
 	return db.prepare(
-		`SELECT path, mood, file_name, strip_name, ascii_name, strip_ascii_name FROM files WHERE mood IS NOT NULL AND analyze_status = 'done'`,
+		`SELECT path, mood, file_name, strip_name, ascii_name, strip_ascii_name FROM files WHERE mood IS NOT NULL`,
 	).all() as { path: string; mood: string; file_name: string; strip_name: string | null; ascii_name: string | null; strip_ascii_name: string | null }[]
 }
 

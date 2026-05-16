@@ -156,6 +156,7 @@ export async function inferFile(
 	filePath: string,
 	sessions: ModelSessions,
 	maxSeconds?: number,
+	models: string[] = ['mood', 'genre', 'tag'],
 ): Promise<{ moodtheme: number[]; genre: number[]; top50tags: number[] }> {
 	const essentia = await essentiaReady
 
@@ -172,6 +173,10 @@ export async function inferFile(
 			const genreAcc = new Float64Array(87)
 			const tagsAcc = new Float64Array(50)
 
+			const runMood = models.includes('mood')
+			const runGenre = models.includes('genre')
+			const runTag = models.includes('tag')
+
 			for (let start = 0; start < numPatches; start += BACKBONE_BATCH) {
 				const end = Math.min(start + BACKBONE_BATCH, numPatches)
 				const batchSize = end - start
@@ -187,25 +192,32 @@ export async function inferFile(
 					const emb = embeds.slice(p * EMB_SIZE, (p + 1) * EMB_SIZE)
 					const embTensor = new ort.Tensor('float32', emb, [1, EMB_SIZE])
 
-					const [moodOut, genreOut, tagsOut] = await Promise.all([
-						sessions.moodtheme.run({ [sessions.moodtheme.inputNames[0]]: embTensor }),
-						sessions.genre.run({ [sessions.genre.inputNames[0]]: embTensor }),
-						sessions.top50tags.run({ [sessions.top50tags.inputNames[0]]: embTensor }),
+					const headRuns = await Promise.all([
+						runMood ? sessions.moodtheme.run({ [sessions.moodtheme.inputNames[0]]: embTensor }) : null,
+						runGenre ? sessions.genre.run({ [sessions.genre.inputNames[0]]: embTensor }) : null,
+						runTag ? sessions.top50tags.run({ [sessions.top50tags.inputNames[0]]: embTensor }) : null,
 					])
 					embTensor.dispose()
 
-					const moodTensor = moodOut[sessions.moodtheme.outputNames[0]]
-					const genreTensor = genreOut[sessions.genre.outputNames[0]]
-					const tagsTensor = tagsOut[sessions.top50tags.outputNames[0]]
-					const md = moodTensor.data as Float32Array
-					const gd = genreTensor.data as Float32Array
-					const td = tagsTensor.data as Float32Array
-					for (let i = 0; i < md.length; i++) moodAcc[i] += md[i]
-					for (let i = 0; i < gd.length; i++) genreAcc[i] += gd[i]
-					for (let i = 0; i < td.length; i++) tagsAcc[i] += td[i]
-					moodTensor.dispose()
-					genreTensor.dispose()
-					tagsTensor.dispose()
+					const [moodOut, genreOut, tagsOut] = headRuns
+					if (moodOut) {
+						const t = moodOut[sessions.moodtheme.outputNames[0]]
+						const d = t.data as Float32Array
+						for (let i = 0; i < d.length; i++) moodAcc[i] += d[i]
+						t.dispose()
+					}
+					if (genreOut) {
+						const t = genreOut[sessions.genre.outputNames[0]]
+						const d = t.data as Float32Array
+						for (let i = 0; i < d.length; i++) genreAcc[i] += d[i]
+						t.dispose()
+					}
+					if (tagsOut) {
+						const t = tagsOut[sessions.top50tags.outputNames[0]]
+						const d = t.data as Float32Array
+						for (let i = 0; i < d.length; i++) tagsAcc[i] += d[i]
+						t.dispose()
+					}
 				}
 			}
 

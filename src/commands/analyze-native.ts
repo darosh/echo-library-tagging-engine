@@ -1,6 +1,6 @@
 import { join } from '@std/path'
 import { Database } from '@db/sqlite'
-import { getPendingForAnalysis, saveAnalysis, setAnalyzeError } from '../utils/db.ts'
+import { getPendingForAnalysis, saveAnalysis } from '../utils/db.ts'
 import { ensureModels } from '../utils/models-loader.ts'
 import { printError, printHeader, printInfo, printSuccess, Progress } from '../utils/progress.ts'
 import type { ErrorMsg, ReadyMsg, ResultMsg } from '../workers/infer-native-worker.ts'
@@ -13,12 +13,13 @@ export async function analyzeNative(opts: {
 	dryRun: boolean
 	maxSeconds?: number
 	ignore: string[]
+	models: string[]
 }): Promise<void> {
-	const { db, root, modelsDir, concurrency, dryRun, maxSeconds, ignore } = opts
+	const { db, root, modelsDir, concurrency, dryRun, maxSeconds, ignore, models } = opts
 
 	printHeader('Analyzing with MTG-Jamendo models (discogs-effnet backbone, native ORT)')
-	printHeader(`Using ${concurrency} workers`)
-	const pending = getPendingForAnalysis(db, ignore)
+	printHeader(`Using ${concurrency} workers, models: ${models.join(', ')}`)
+	const pending = getPendingForAnalysis(db, models, ignore)
 	if (pending.length === 0) {
 		printInfo('No files pending analysis — run collect first or all already done')
 		return
@@ -52,7 +53,7 @@ export async function analyzeNative(opts: {
 				if (e.data.type === 'ready') resolve()
 			}
 			worker.onerror = (e) => reject(new Error(e.message))
-			worker.postMessage({ type: 'init', modelPaths, maxSeconds })
+			worker.postMessage({ type: 'init', modelPaths, maxSeconds, models })
 		})
 
 		// Process files sequentially until queue is empty; each worker owns one file at a time
@@ -75,12 +76,11 @@ export async function analyzeNative(opts: {
 					const topMood = moodLabels[msg.moodtheme.reduce((b, v, i) => v > msg.moodtheme[b] ? i : b, 0)]
 					const topGenre = genreLabels[msg.genre.reduce((b, v, i) => v > msg.genre[b] ? i : b, 0)]
 					const topTag = tagLabels[msg.top50tags.reduce((b, v, i) => v > msg.top50tags[b] ? i : b, 0)]
-					saveAnalysis(db, msg.id, topMood, topGenre, topTag)
+					saveAnalysis(db, msg.id, models, topMood, topGenre, topTag)
 				} else {
 					if (msg.message === 'audio too short') {
-						saveAnalysis(db, msg.id, 'unknown', 'unknown', 'unknown')
+						saveAnalysis(db, msg.id, models, 'unknown', 'unknown', 'unknown')
 					} else {
-						setAnalyzeError(db, msg.id)
 						errors++
 						printError(currentFile?.path ?? String(msg.id), msg.message)
 					}

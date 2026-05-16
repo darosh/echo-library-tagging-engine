@@ -12,6 +12,7 @@ interface InitMsg {
 	type: 'init'
 	modelPaths: { backbone: string; moodtheme: string; genre: string; top50tags: string }
 	maxSeconds?: number
+	models: string[]
 }
 
 interface ProcessMsg {
@@ -43,6 +44,7 @@ const ctx = self as any
 
 let sessions: ModelSessions
 let maxSeconds: number | undefined
+let models: string[] = ['mood', 'genre', 'tag']
 
 ctx.onmessage = async (event: MessageEvent<InitMsg | ProcessMsg>) => {
 	const msg = event.data
@@ -50,12 +52,13 @@ ctx.onmessage = async (event: MessageEvent<InitMsg | ProcessMsg>) => {
 	if (msg.type === 'init') {
 		sessions = await loadModels(msg.modelPaths)
 		maxSeconds = msg.maxSeconds
+		models = msg.models
 		ctx.postMessage({ type: 'ready' } satisfies ReadyMsg)
 		return
 	}
 
 	try {
-		const result = await inferFile(msg.filePath, sessions, maxSeconds)
+		const result = await inferFile(msg.filePath, sessions, maxSeconds, models)
 		ctx.postMessage({ type: 'result', id: msg.id, ...result } satisfies ResultMsg)
 	} catch (err) {
 		ctx.postMessage(

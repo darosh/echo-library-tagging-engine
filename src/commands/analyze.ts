@@ -1,6 +1,6 @@
 import { join } from '@std/path'
 import { Database } from '@db/sqlite'
-import { getPendingForAnalysis, saveAnalysis, setAnalyzeError } from '../utils/db.ts'
+import { getPendingForAnalysis, saveAnalysis } from '../utils/db.ts'
 import { ensureModels } from '../utils/models-loader.ts'
 import { inferFile, loadModels, OrtMutex } from '../utils/infer.ts'
 import { printError, printHeader, printInfo, printSuccess, Progress } from '../utils/progress.ts'
@@ -13,12 +13,13 @@ export async function analyze(opts: {
 	dryRun: boolean
 	maxSeconds?: number
 	ignore: string[]
+	models: string[]
 }): Promise<void> {
-	const { db, root, modelsDir, concurrency, dryRun, maxSeconds, ignore } = opts
+	const { db, root, modelsDir, concurrency, dryRun, maxSeconds, ignore, models } = opts
 
 	printHeader('Analyzing with MTG-Jamendo models (discogs-effnet backbone)')
-	printHeader(`Using ${concurrency} workers`)
-	const pending = getPendingForAnalysis(db, ignore)
+	printHeader(`Using ${concurrency} workers, models: ${models.join(', ')}`)
+	const pending = getPendingForAnalysis(db, models, ignore)
 	if (pending.length === 0) {
 		printInfo('No files pending analysis — run collect first or all already done')
 		return
@@ -54,13 +55,12 @@ export async function analyze(opts: {
 				const topGenre = genreLabels[genre.reduce((b, v, i) => v > genre[b] ? i : b, 0)]
 				const topTag = tagLabels[top50tags.reduce((b, v, i) => v > top50tags[b] ? i : b, 0)]
 
-				saveAnalysis(db, file.id, topMood, topGenre, topTag)
+				saveAnalysis(db, file.id, models, topMood, topGenre, topTag)
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err)
 				if (msg === 'audio too short') {
-					saveAnalysis(db, file.id, 'unknown', 'unknown', 'unknown')
+					saveAnalysis(db, file.id, models, 'unknown', 'unknown', 'unknown')
 				} else {
-					setAnalyzeError(db, file.id)
 					errors++
 					printError(file.path, msg)
 				}
