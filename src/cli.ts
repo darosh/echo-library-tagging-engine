@@ -74,7 +74,7 @@ export function buildCli() {
 				.option('--max <seconds:number>', 'Limit audio analyzed per file to this many seconds (central slice)')
 				.option('--ignore <genres:string>', 'Comma-separated original genres to skip', { default: DEFAULT_IGNORE })
 				.option('--runtime <rt:string>', 'ONNX runtime: native (default, faster) or wasm', { default: 'native' })
-				.option('--models <models:string>', 'Comma-separated heads to run: mood,genre,tag', { default: 'mood' })
+				.option('--models <models:string>', 'Comma-separated heads to run: mood,genre,tag', { default: 'mood,genre,tag' })
 				.option('--dry-run', 'Preview without modifying database')
 				.action(async ({ input, db: dbPath, modelsDir, concurrency, max, ignore, runtime, models: modelsStr, dryRun }) => {
 					const db = openDb(resolve(dbPath))
