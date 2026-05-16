@@ -45,14 +45,18 @@ export class Progress {
 
 	increment(detail = ''): void {
 		this.current++
-		this.render(detail)
+		const now = Date.now()
+		if (this.current >= this.total || now - this.lastRenderTime >= 200) {
+			this.lastRenderTime = now
+			this.render(detail)
+		}
 		if (this.current >= this.total) {
-			// newline after bar completes
 			console.log('')
 		}
 	}
 
 	private lastVisibleLen = 0
+	private lastRenderTime = 0
 
 	private render(detail = ''): void {
 		const pct = this.total > 0 ? this.current / this.total : 0
