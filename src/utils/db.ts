@@ -169,8 +169,9 @@ export function upsertFile(
 	albumArtist2: string | null,
 	date2: string | null,
 	discNumber2: string | null,
+	parsed?: ReturnType<typeof parsePath>,
 ): void {
-	const parsed = parsePath(path)
+	if (!parsed) parsed = parsePath(path)
 	db.exec(
 		`INSERT INTO files (path, mtime, genre_1, genre_2, title_2, track_number_2, artist_2, album_artist_2, date_2, disc_number_2, collect_status, root_path, artist_path, album_path, file_name, file_type, strip_name, ascii_name, strip_ascii_name)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?, ?)

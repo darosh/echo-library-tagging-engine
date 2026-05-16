@@ -1,11 +1,23 @@
-import { relative } from '@std/path'
+import { dirname, relative } from '@std/path'
 import { walk } from '@std/fs'
+import { extname } from '@std/path'
 import { Database } from '@db/sqlite'
-import { upsertFile } from '../utils/db.ts'
+import { parsePath, upsertFile } from '../utils/db.ts'
 import { printHeader, printInfo, printSuccess, Progress } from '../utils/progress.ts'
 
 export const DEFAULT_FILTER = '**/*.{mp3,flac,dsf}'
 const SUPPORTED_EXTS = new Set(['.mp3', '.flac', '.dsf'])
+
+const KID3_FIELDS = [
+	'genre 1',
+	'genre 2',
+	'title 2',
+	'tracknumber 2',
+	'artist 2',
+	'albumartist 2',
+	'date 2',
+	'discnumber 2',
+]
 
 export async function collect(opts: {
 	db: Database
@@ -37,42 +49,77 @@ export async function collect(opts: {
 		return
 	}
 
+	// Group files by folder for folder-level strip_ascii_name deduplication
+	const byFolder = new Map<string, string[]>()
+	for (const filePath of files) {
+		const relPath = relative(root, filePath)
+		const folder = dirname(relPath)
+		const group = byFolder.get(folder) ?? []
+		group.push(filePath)
+		byFolder.set(folder, group)
+	}
+	const folders = [...byFolder.entries()]
+
 	const progress = new Progress(files.length, 'Collecting')
 
-	for (let i = 0; i < files.length; i += concurrency) {
-		const batch = files.slice(i, i + concurrency)
-		await Promise.all(batch.map(async (filePath) => {
-			const relPath = relative(root, filePath)
-			const nfcPath = filePath.normalize('NFC')
-			const [genre1, genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2, stat] = await Promise.all([
-				readKid3Field(nfcPath, 'genre 1'),
-				readKid3Field(nfcPath, 'genre 2'),
-				readKid3Field(nfcPath, 'title 2'),
-				readKid3Field(nfcPath, 'tracknumber 2'),
-				readKid3Field(nfcPath, 'artist 2'),
-				readKid3Field(nfcPath, 'albumartist 2'),
-				readKid3Field(nfcPath, 'date 2'),
-				readKid3Field(nfcPath, 'discnumber 2'),
-				Deno.stat(filePath).catch(() => null),
-			])
-			const mtime = stat?.mtime?.getTime() ?? null
-			upsertFile(db, relPath, mtime, genre1, genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2)
-			progress.increment(relPath)
+	for (let i = 0; i < folders.length; i += concurrency) {
+		const batch = folders.slice(i, i + concurrency)
+		await Promise.all(batch.map(async ([_folder, folderFiles]) => {
+			// Collect kid3 + stat for all files in folder in parallel
+			const results = await Promise.all(folderFiles.map(async (filePath) => {
+				const nfcPath = filePath.normalize('NFC')
+				const [fields, stat] = await Promise.all([
+					readKid3Fields(nfcPath, KID3_FIELDS),
+					Deno.stat(filePath).catch(() => null),
+				])
+				return { filePath, fields, stat }
+			}))
+
+			// Build parsed paths and deduplicate strip_ascii_name within folder
+			const used = new Map<string, number>()
+			for (const { filePath, fields, stat } of results) {
+				const relPath = relative(root, filePath)
+				const parsed = parsePath(relPath)
+
+				const base = parsed.strip_ascii_name
+				if (!used.has(base)) {
+					used.set(base, 1)
+				} else {
+					const n = used.get(base)!
+					used.set(base, n + 1)
+					const ext = extname(base)
+					const stem = base.slice(0, -ext.length || undefined)
+					parsed.strip_ascii_name = `${stem} (${n})${ext}`
+				}
+
+				const mtime = stat?.mtime?.getTime() ?? null
+				const [genre1, genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2] = fields
+				upsertFile(db, relPath, mtime, genre1, genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2, parsed)
+				progress.increment(relPath)
+			}
 		}))
 	}
 
 	printSuccess(`Collected ${files.length} files into database`)
 }
 
-async function readKid3Field(nfcPath: string, field: string): Promise<string | null> {
+async function readKid3Fields(nfcPath: string, fields: string[]): Promise<(string | null)[]> {
+	const args: string[] = []
+	for (const field of fields) {
+		args.push('-c', `get ${field}`)
+	}
+	args.push(nfcPath)
 	const { code, stdout } = await new Deno.Command('kid3-cli', {
-		args: ['-c', `get ${field}`, nfcPath],
+		args,
 		stdout: 'piped',
 		stderr: 'null',
 	}).output()
-	if (code !== 0) return null
-	const val = new TextDecoder().decode(stdout).trim()
-	return val || null
+	if (code !== 0) return fields.map(() => null)
+	const lines = new TextDecoder().decode(stdout).split('\n')
+	return fields.map((_, i) => {
+		const val = (lines[i] ?? '').trim()
+		return val || null
+	})
 }
 
 // Minimal glob matching for **/*.ext, subdirectory patterns, and {a,b,c} brace expansion
