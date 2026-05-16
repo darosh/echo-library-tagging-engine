@@ -2,8 +2,8 @@ import { join } from '@std/path'
 import { Database } from '@db/sqlite'
 import { getPendingForAnalysis, saveAnalysis, setAnalyzeError } from '../utils/db.ts'
 import { ensureModels } from '../utils/models-loader.ts'
-import { inferFile, loadModels } from '../utils/infer-native.ts'
 import { printError, printHeader, printInfo, printSuccess, Progress } from '../utils/progress.ts'
+import type { ErrorMsg, ReadyMsg, ResultMsg } from '../workers/infer-native-worker.ts'
 
 export async function analyzeNative(opts: {
 	db: Database
@@ -40,35 +40,60 @@ export async function analyzeNative(opts: {
 	const progress = new Progress(pending.length, 'Analyzing')
 	let errors = 0
 
-	const sessions = await loadModels(modelPaths)
+	const workerUrl = import.meta.resolve('../workers/infer-native-worker.ts')
 	const queue = [...pending]
-	async function worker() {
-		while (queue.length > 0) {
-			const file = queue.shift()!
-			const absPath = join(root, file.path)
-			try {
-				const { moodtheme, genre, top50tags } = await inferFile(absPath, sessions, maxSeconds)
 
-				const topMood = moodLabels[moodtheme.reduce((b, v, i) => v > moodtheme[b] ? i : b, 0)]
-				const topGenre = genreLabels[genre.reduce((b, v, i) => v > genre[b] ? i : b, 0)]
-				const topTag = tagLabels[top50tags.reduce((b, v, i) => v > top50tags[b] ? i : b, 0)]
+	async function runWorker() {
+		const worker = new Worker(workerUrl, { type: 'module' })
 
-				saveAnalysis(db, file.id, topMood, topGenre, topTag)
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err)
-				if (msg === 'audio too short') {
-					saveAnalysis(db, file.id, 'unknown', 'unknown', 'unknown')
-				} else {
-					setAnalyzeError(db, file.id)
-					errors++
-					printError(file.path, msg)
-				}
+		// Wait for worker to finish loading models
+		await new Promise<void>((resolve, reject) => {
+			worker.onmessage = (e: MessageEvent<ReadyMsg>) => {
+				if (e.data.type === 'ready') resolve()
 			}
-			progress.increment(file.path.split('/').pop() ?? '')
-		}
+			worker.onerror = (e) => reject(new Error(e.message))
+			worker.postMessage({ type: 'init', modelPaths, maxSeconds })
+		})
+
+		// Process files sequentially until queue is empty; each worker owns one file at a time
+		await new Promise<void>((resolve) => {
+			let currentFile: { id: number; path: string } | null = null
+
+			function next() {
+				if (queue.length === 0) {
+					worker.terminate()
+					resolve()
+					return
+				}
+				currentFile = queue.shift()!
+				worker.postMessage({ type: 'process', id: currentFile.id, filePath: join(root, currentFile.path) })
+			}
+
+			worker.onmessage = (e: MessageEvent<ResultMsg | ErrorMsg>) => {
+				const msg = e.data
+				if (msg.type === 'result') {
+					const topMood = moodLabels[msg.moodtheme.reduce((b, v, i) => v > msg.moodtheme[b] ? i : b, 0)]
+					const topGenre = genreLabels[msg.genre.reduce((b, v, i) => v > msg.genre[b] ? i : b, 0)]
+					const topTag = tagLabels[msg.top50tags.reduce((b, v, i) => v > msg.top50tags[b] ? i : b, 0)]
+					saveAnalysis(db, msg.id, topMood, topGenre, topTag)
+				} else {
+					if (msg.message === 'audio too short') {
+						saveAnalysis(db, msg.id, 'unknown', 'unknown', 'unknown')
+					} else {
+						setAnalyzeError(db, msg.id)
+						errors++
+						printError(currentFile?.path ?? String(msg.id), msg.message)
+					}
+				}
+				progress.increment(currentFile?.path.split('/').pop() ?? '')
+				next()
+			}
+
+			next()
+		})
 	}
 
-	await Promise.all(Array.from({ length: concurrency }, worker))
+	await Promise.all(Array.from({ length: concurrency }, runWorker))
 
 	printSuccess(`Analyzed ${pending.length - errors} files (${errors} errors)`)
 }
