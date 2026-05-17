@@ -3,7 +3,7 @@ import { walk } from '@std/fs'
 import { Database } from '@db/sqlite'
 import { upsertFile } from '../utils/db.ts'
 import { printError, printHeader, printInfo, printSuccess, Progress } from '../utils/progress.ts'
-import type { ErrorMsg, ResultMsg, RowMsg } from '../workers/collect-worker.ts'
+import type { ErrorMsg, ResultMsg } from '../workers/collect-worker.ts'
 
 export const DEFAULT_FILTER = '**/*.{mp3,flac,dsf}'
 const SUPPORTED_EXTS = new Set(['.mp3', '.flac', '.dsf'])
@@ -73,26 +73,11 @@ export async function collect(opts: {
 				worker.postMessage({ type: 'process', root, folder: _folder, files: folderFiles })
 			}
 
-			worker.onmessage = (e: MessageEvent<RowMsg | ResultMsg | ErrorMsg>) => {
+			worker.onmessage = (e: MessageEvent<ResultMsg | ErrorMsg>) => {
 				const msg = e.data
-				if (msg.type === 'row') {
-					const row = msg.row
-					upsertFile(
-						db,
-						row.relPath,
-						row.mtime,
-						row.genre1,
-						row.genre2,
-						row.title2,
-						row.trackNumber2,
-						row.artist2,
-						row.albumArtist2,
-						row.date2,
-						row.discNumber2,
-						row.parsed,
-					)
-					progress.increment(row.relPath)
-					return
+				if (msg.type === 'result') {
+					writeAlbumRows(db, msg.rows)
+					for (const row of msg.rows) progress.increment(row.relPath)
 				}
 				if (msg.type === 'error') {
 					albumErrors++
@@ -110,6 +95,32 @@ export async function collect(opts: {
 	await Promise.all(Array.from({ length: Math.min(concurrency, folders.length) }, runWorker))
 
 	printSuccess(`Collected ${files.length - failedFiles} files into database (${albumErrors} album errors)`)
+}
+
+function writeAlbumRows(db: Database, rows: ResultMsg['rows']): void {
+	db.exec('BEGIN')
+	try {
+		for (const row of rows) {
+			upsertFile(
+				db,
+				row.relPath,
+				row.mtime,
+				row.genre1,
+				row.genre2,
+				row.title2,
+				row.trackNumber2,
+				row.artist2,
+				row.albumArtist2,
+				row.date2,
+				row.discNumber2,
+				row.parsed,
+			)
+		}
+		db.exec('COMMIT')
+	} catch (err) {
+		db.exec('ROLLBACK')
+		throw err
+	}
 }
 
 // Minimal glob matching for **/*.ext, subdirectory patterns, and {a,b,c} brace expansion

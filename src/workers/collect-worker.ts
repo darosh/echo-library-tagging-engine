@@ -37,13 +37,7 @@ export interface CollectRow {
 export interface ResultMsg {
 	type: 'result'
 	folder: string
-	fileCount: number
-}
-
-export interface RowMsg {
-	type: 'row'
-	folder: string
-	row: CollectRow
+	rows: CollectRow[]
 }
 
 export interface ErrorMsg {
@@ -81,7 +75,7 @@ ctx.onmessage = async (event: MessageEvent<ProcessMsg>) => {
 			parsedByPath.set(filePath, parsed)
 		}
 
-		await Promise.all(msg.files.map(async (filePath) => {
+		const rows = await Promise.all(msg.files.map(async (filePath) => {
 			const nfcPath = filePath.normalize('NFC')
 			const [fields, stat] = await Promise.all([
 				readKid3Fields(nfcPath, KID3_FIELDS),
@@ -89,28 +83,22 @@ ctx.onmessage = async (event: MessageEvent<ProcessMsg>) => {
 			])
 			const relPath = relative(msg.root, filePath)
 			const [genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2, genre1] = fields
-			ctx.postMessage(
-				{
-					type: 'row',
-					folder: msg.folder,
-					row: {
-						relPath,
-						mtime: stat?.mtime?.getTime() ?? null,
-						genre1,
-						genre2,
-						title2,
-						trackNumber2,
-						artist2,
-						albumArtist2,
-						date2,
-						discNumber2,
-						parsed: parsedByPath.get(filePath)!,
-					},
-				} satisfies RowMsg,
-			)
+			return {
+				relPath,
+				mtime: stat?.mtime?.getTime() ?? null,
+				genre1,
+				genre2,
+				title2,
+				trackNumber2,
+				artist2,
+				albumArtist2,
+				date2,
+				discNumber2,
+				parsed: parsedByPath.get(filePath)!,
+			}
 		}))
 
-		ctx.postMessage({ type: 'result', folder: msg.folder, fileCount: msg.files.length } satisfies ResultMsg)
+		ctx.postMessage({ type: 'result', folder: msg.folder, rows } satisfies ResultMsg)
 	} catch (err) {
 		ctx.postMessage(
 			{
