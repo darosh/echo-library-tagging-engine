@@ -1,25 +1,12 @@
 import { dirname, relative } from '@std/path'
 import { walk } from '@std/fs'
-import { extname } from '@std/path'
 import { Database } from '@db/sqlite'
-import { parsePath, upsertFile } from '../utils/db.ts'
-import { printHeader, printInfo, printSuccess, Progress } from '../utils/progress.ts'
+import { upsertFile } from '../utils/db.ts'
+import { printError, printHeader, printInfo, printSuccess, Progress } from '../utils/progress.ts'
+import type { ErrorMsg, ResultMsg, RowMsg } from '../workers/collect-worker.ts'
 
 export const DEFAULT_FILTER = '**/*.{mp3,flac,dsf}'
 const SUPPORTED_EXTS = new Set(['.mp3', '.flac', '.dsf'])
-
-// 'genre 1' (ID3v1) is queried separately because it emits no output line when
-// the ID3v1 tag is absent, which would shift all subsequent index-based field mappings.
-const KID3_FIELDS_GENRE1 = ['genre 1']
-const KID3_FIELDS = [
-	'genre 2',
-	'title 2',
-	'tracknumber 2',
-	'artist 2',
-	'albumartist 2',
-	'date 2',
-	'discnumber 2',
-]
 
 export async function collect(opts: {
 	db: Database
@@ -28,7 +15,8 @@ export async function collect(opts: {
 	dryRun: boolean
 	concurrency: number
 }): Promise<void> {
-	const { db, root, filter, dryRun, concurrency } = opts
+	const { db, root, filter, dryRun } = opts
+	const concurrency = Math.max(1, Math.floor(opts.concurrency))
 
 	printHeader(`Collecting metadata from ${root} (filter: ${filter})`)
 
@@ -63,67 +51,65 @@ export async function collect(opts: {
 	const folders = [...byFolder.entries()]
 
 	const progress = new Progress(files.length, 'Collecting')
+	let nextFolder = 0
+	let albumErrors = 0
+	let failedFiles = 0
+	const workerUrl = import.meta.resolve('../workers/collect-worker.ts')
 
-	for (let i = 0; i < folders.length; i += concurrency) {
-		const batch = folders.slice(i, i + concurrency)
-		await Promise.all(batch.map(async ([_folder, folderFiles]) => {
-			// Collect kid3 + stat for all files in folder in parallel
-			const results = await Promise.all(folderFiles.map(async (filePath) => {
-				const nfcPath = filePath.normalize('NFC')
-				const [genre1Fields, fields, stat] = await Promise.all([
-					readKid3Fields(nfcPath, KID3_FIELDS_GENRE1),
-					readKid3Fields(nfcPath, KID3_FIELDS),
-					Deno.stat(filePath).catch(() => null),
-				])
-				return { filePath, genre1Fields, fields, stat }
-			}))
+	async function runWorker() {
+		const worker = new Worker(workerUrl, { type: 'module' })
 
-			// Build parsed paths and deduplicate strip_ascii_name within folder
-			const used = new Map<string, number>()
-			for (const { filePath, genre1Fields, fields, stat } of results) {
-				const relPath = relative(root, filePath)
-				const parsed = parsePath(relPath)
+		await new Promise<void>((resolve, reject) => {
+			worker.onerror = (e) => reject(new Error(e.message))
 
-				const base = parsed.strip_ascii_name
-				if (!used.has(base)) {
-					used.set(base, 1)
-				} else {
-					const n = used.get(base)!
-					used.set(base, n + 1)
-					const ext = extname(base)
-					const stem = base.slice(0, -ext.length || undefined)
-					parsed.strip_ascii_name = `${stem} (${n})${ext}`
+			function next() {
+				const folderEntry = folders[nextFolder++]
+				if (!folderEntry) {
+					worker.terminate()
+					resolve()
+					return
 				}
-
-				const mtime = stat?.mtime?.getTime() ?? null
-				const [genre1] = genre1Fields
-				const [genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2] = fields
-				upsertFile(db, relPath, mtime, genre1, genre2, title2, trackNumber2, artist2, albumArtist2, date2, discNumber2, parsed)
-				progress.increment(relPath)
+				const [_folder, folderFiles] = folderEntry
+				worker.postMessage({ type: 'process', root, folder: _folder, files: folderFiles })
 			}
-		}))
+
+			worker.onmessage = (e: MessageEvent<RowMsg | ResultMsg | ErrorMsg>) => {
+				const msg = e.data
+				if (msg.type === 'row') {
+					const row = msg.row
+					upsertFile(
+						db,
+						row.relPath,
+						row.mtime,
+						row.genre1,
+						row.genre2,
+						row.title2,
+						row.trackNumber2,
+						row.artist2,
+						row.albumArtist2,
+						row.date2,
+						row.discNumber2,
+						row.parsed,
+					)
+					progress.increment(row.relPath)
+					return
+				}
+				if (msg.type === 'error') {
+					albumErrors++
+					failedFiles += msg.fileCount
+					printError(msg.folder, msg.message)
+					for (let i = 0; i < msg.fileCount; i++) progress.increment(msg.folder)
+				}
+				next()
+			}
+
+			next()
+		})
 	}
 
-	printSuccess(`Collected ${files.length} files into database`)
-}
+	await Promise.all(Array.from({ length: Math.min(concurrency, folders.length) }, runWorker))
 
-async function readKid3Fields(nfcPath: string, fields: string[]): Promise<(string | null)[]> {
-	const args: string[] = []
-	for (const field of fields) {
-		args.push('-c', `get ${field}`)
-	}
-	args.push(nfcPath)
-	const { code, stdout } = await new Deno.Command('kid3-cli', {
-		args,
-		stdout: 'piped',
-		stderr: 'null',
-	}).output()
-	if (code !== 0) return fields.map(() => null)
-	const lines = new TextDecoder().decode(stdout).split('\n')
-	return fields.map((_, i) => {
-		const val = (lines[i] ?? '').trim()
-		return val || null
-	})
+	printSuccess(`Collected ${files.length - failedFiles} files into database (${albumErrors} album errors)`)
 }
 
 // Minimal glob matching for **/*.ext, subdirectory patterns, and {a,b,c} brace expansion
